@@ -2,6 +2,7 @@ import os
 import random
 import logging
 import threading
+import asyncio
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -19,7 +20,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 OWNER_ID = int(os.environ.get("OWNER_ID", 0))
 
-# --- DUMMY WEB SERVER FOR RENDER (To prevent Port Scan Timeout) ---
+# --- DUMMY WEB SERVER FOR RENDER ---
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -44,73 +45,43 @@ def get_questions(category):
     if category == "hard": return HARD_QUESTIONS
     return []
 
-# --- QUIZ ENGINE LOGIC ---
-async def send_question(context: ContextTypes.DEFAULT_TYPE):
-    job = context.job
-    chat_id = job.chat_id
-    data = job.data
+# --- THE FIXED QUIZ ENGINE (Using asyncio) ---
+async def quiz_loop(chat_id, context: ContextTypes.DEFAULT_TYPE, data):
+    # Wait for a tiny moment before starting
+    await asyncio.sleep(1)
     
-    q_index = data['q_index']
-    repeat_count = data['repeat']
-    question_list = get_questions(data['category'])
-    
-    if q_index >= len(question_list):
-        await context.bot.send_message(chat_id, "🎉 *Quiz Completed!* All questions finished. Use `Quiz@on` to play again.", parse_mode='Markdown')
-        context.chat_data.pop('quiz_active', None)
-        return
+    while context.chat_data.get('quiz_active') and data['q_index'] < len(get_questions(data['category'])):
+        questions = get_questions(data['category'])
+        question = questions[data['q_index']]
+        data['answer_guessed'] = False
+        
+        # Send question 3 times
+        for attempt in range(3):
+            if data['answer_guessed']: break
+            
+            msg_text = f"❓ *{question['q']}*\n\nType your answer below! 👇\n_(Time: {data['speed']}s | Attempt: {attempt+1}/3)_"
+            await context.bot.send_message(chat_id, msg_text, parse_mode='Markdown')
+            
+            # Wait for the speed duration
+            await asyncio.sleep(data['speed'])
+            
+            # If someone answered, break the loop and go to next question
+            if data['answer_guessed']: break
 
-    question = question_list[q_index]
-
-    if repeat_count >= 3:
-        await context.bot.send_message(
-            chat_id, 
-            f"⏰ *Time's up!* The correct answer was: *{question['a'].title()}*\n\nStarting next question... 🔄",
-            parse_mode='Markdown'
-        )
+        # If nobody answered in 3 attempts, reveal answer
+        if not data['answer_guessed']:
+            await context.bot.send_message(
+                chat_id, 
+                f"⏰ *Time's up!* The correct answer was: *{question['a'].title()}*",
+                parse_mode='Markdown'
+            )
+            await asyncio.sleep(2)
+        
         data['q_index'] += 1
-        data['repeat'] = 0
-        job.data = data
-        context.job_queue.run_once(send_question, 2, chat_id=chat_id, data=data)
-        return
+        await asyncio.sleep(1) # Small gap before next question
 
-    msg = await context.bot.send_message(
-        chat_id, 
-        f"❓ *{question['q']}*\n\nType your answer below! 👇\n_(Time: {data['speed']}s | Repeat: {repeat_count+1}/3)_",
-        parse_mode='Markdown'
-    )
-    data['repeat'] += 1
-    job.data = data
-    
-    # Schedule the next repeat if no one answers
-    context.job_queue.run_once(send_question, data['speed'], chat_id=chat_id, data=data)
-
-async def start_quiz(chat_id, context: ContextTypes.DEFAULT_TYPE, category: str, speed: int = 15):
-    questions = get_questions(category)
-    if not questions:
-        await context.bot.send_message(chat_id, "❌ No questions found for this category.")
-        return
-
-    random.shuffle(questions)
-    
-    data = {
-        'category': category,
-        'speed': speed,
-        'q_index': 0,
-        'repeat': 0,
-        'answer_guessed': False
-    }
-    
-    context.chat_data['quiz_active'] = True
-    context.chat_data['quiz_data'] = data
-    
-    await context.bot.send_message(
-        chat_id, 
-        f"🚀 *Quiz Started!*\nCategory: *{category.title()}*\nSpeed: {speed}s | Repeat: 3 times\nLet's go! 🔥",
-        parse_mode='Markdown'
-    )
-    
-    # Send first question immediately
-    context.job_queue.run_once(send_question, 1, chat_id=chat_id, data=data)
+    await context.bot.send_message(chat_id, "🎉 *Quiz Completed!* All questions finished. Use `Quiz@on` to play again.", parse_mode='Markdown')
+    context.chat_data.pop('quiz_active', None)
 
 # --- COMMAND HANDLERS ---
 
@@ -174,7 +145,28 @@ async def category_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     speed = context.chat_data.get('group_speed', 15)
     
     await query.edit_message_text(f"✅ Category *{category.title()}* selected!\nStarting quiz at {speed}s speed... 🚀", parse_mode='Markdown')
-    await start_quiz(query.message.chat_id, context, category, speed)
+    
+    questions = get_questions(category)
+    random.shuffle(questions)
+    
+    data = {
+        'category': category,
+        'speed': speed,
+        'q_index': 0,
+        'answer_guessed': False
+    }
+    
+    context.chat_data['quiz_active'] = True
+    context.chat_data['quiz_data'] = data
+    
+    await context.bot.send_message(
+        query.message.chat_id, 
+        f"🚀 *Quiz Started!*\nCategory: *{category.title()}*\nSpeed: {speed}s | Repeat: 3 times\nLet's go! 🔥",
+        parse_mode='Markdown'
+    )
+    
+    # Start the loop in background
+    asyncio.create_task(quiz_loop(query.message.chat_id, context, data))
 
 async def speed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type not in ['group', 'supergroup']:
@@ -302,17 +294,6 @@ async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.chat_data['quiz_data'] = data
         
         await update.message.reply_text(f"✅ *Correct, {user.first_name}!* 🎉 +1 Point!\nAnswer: *{correct_answer.title()}*", parse_mode='Markdown')
-        
-        # Cancel pending repeat jobs
-        for job in context.job_queue.get_jobs_by_name(f"quiz_{update.effective_chat.id}"):
-            job.schedule_removal()
-            
-        data['q_index'] += 1
-        data['repeat'] = 0
-        data['answer_guessed'] = False
-        
-        # Move to next question in 2 seconds
-        context.job_queue.run_once(send_question, 2, chat_id=update.effective_chat.id, data=data, name=f"quiz_{update.effective_chat.id}")
 
 # --- MAIN BOT SETUP ---
 def main():

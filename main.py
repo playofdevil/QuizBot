@@ -1,6 +1,8 @@
 import os
 import random
 import logging
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
@@ -16,6 +18,18 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 OWNER_ID = int(os.environ.get("OWNER_ID", 0))
+
+# --- DUMMY WEB SERVER FOR RENDER (To prevent Port Scan Timeout) ---
+class DummyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is alive!")
+
+def run_dummy_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(('0.0.0.0', port), DummyHandler)
+    server.serve_forever()
 
 # --- HELPER FUNCTIONS ---
 def parse_command(text):
@@ -58,7 +72,6 @@ async def send_next_question(context: ContextTypes.DEFAULT_TYPE):
         data['q_index'] += 1
         data['repeat'] = 0
         job.data = data
-        # Send next question immediately
         context.job_queue.run_once(send_next_question, 2, chat_id=chat_id, data=data)
         return
 
@@ -89,7 +102,6 @@ async def start_quiz(chat_id, context: ContextTypes.DEFAULT_TYPE, category: str,
         'answer_guessed': False
     }
     
-    # Store in chat_data to prevent multiple quizzes in one group
     context.chat_data['quiz_active'] = True
     context.chat_data['quiz_data'] = data
     
@@ -98,7 +110,6 @@ async def start_quiz(chat_id, context: ContextTypes.DEFAULT_TYPE, category: str,
         f"🚀 **Quiz Started!** Category: **{category.title()}**\nSpeed: {speed}s | Repeat: 3 times\nLet's go! 🔥"
     )
     
-    # Start the job queue loop
     context.job_queue.run_once(send_next_question, 2, chat_id=chat_id, data=data)
 
 # --- COMMAND HANDLERS ---
@@ -135,7 +146,6 @@ async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ A quiz is already running in this group! Use `Quiz@off` to stop it first.")
             return
         
-        # Ask for category
         keyboard = [
             [InlineKeyboardButton("🟢 Easy", callback_data="cat_easy")],
             [InlineKeyboardButton("🟡 Medium", callback_data="cat_medium")],
@@ -150,7 +160,6 @@ async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         context.chat_data.pop('quiz_active', None)
         context.chat_data.pop('quiz_data', None)
-        # Remove any pending jobs
         for job in context.job_queue.get_jobs_by_name(f"quiz_{update.effective_chat.id}"):
             job.schedule_removal()
         await update.message.reply_text("⏸️ **Quiz Stopped!** Thanks for playing. 🎉")
@@ -164,7 +173,7 @@ async def category_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     category = query.data.split("_")[1]
-    speed = 15 # Default 15s
+    speed = context.chat_data.get('group_speed', 15)
     
     await query.edit_message_text(f"✅ Category **{category.title()}** selected!\nStarting quiz at {speed}s speed... 🚀", parse_mode='Markdown')
     await start_quiz(query.message.chat_id, context, category, speed)
@@ -173,20 +182,18 @@ async def speed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type not in ['group', 'supergroup']:
         return
     
-    # Check if user is admin
     try:
         member = await update.effective_chat.get_member(update.effective_user.id)
         if member.status not in ['administrator', 'creator']:
             await update.message.reply_text("❌ Only Group Admins can change the speed! 🛑")
             return
-    except Exception as e:
+    except Exception:
         await update.message.reply_text("❌ Could not verify admin status.")
         return
 
     text = update.message.text
     cmd, arg = parse_command(text)
     
-    # Parse speed (e.g., 5s, 10s, 1m)
     if not arg:
         await update.message.reply_text("⚠️ Usage: `Speed@10s` or `Speed@1m`")
         return
@@ -204,8 +211,6 @@ async def speed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Invalid speed! Use between `5s` to `60s` or `1m` to `2m`.")
         return
 
-    # Save speed for this specific group (In a real DB, you'd save to groups_col. Here we save in context for simplicity, 
-    # but I'll modify start_quiz to use this speed).
     context.chat_data['group_speed'] = speed
     await update.message.reply_text(f"⚡ Speed set to **{speed} seconds** for this group! (Repeat time updated) ⏱️", parse_mode='Markdown')
 
@@ -280,7 +285,6 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await status_msg.edit_text(f"✅ **Broadcast Complete!**\n\nSent: {success}\nFailed: {failed}")
 
 async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Check if quiz is active in this group
     if not context.chat_data.get('quiz_active'):
         return
     
@@ -288,7 +292,6 @@ async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not data or data.get('answer_guessed'):
         return
     
-    # Check if user is answering
     user_answer = update.message.text.lower().strip()
     category = data['category']
     q_index = data['q_index']
@@ -299,7 +302,6 @@ async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     correct_answer = questions[q_index]['a'].lower()
     
     if user_answer == correct_answer:
-        # Correct answer!
         user = update.effective_user
         add_score(user.id, user.first_name, 1)
         data['answer_guessed'] = True
@@ -307,7 +309,6 @@ async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(f"✅ **Correct, {user.first_name}!** 🎉 +1 Point!\nAnswer: **{correct_answer.title()}**", parse_mode='Markdown')
         
-        # Cancel current job and move to next question
         for job in context.job_queue.get_jobs_by_name(f"quiz_{update.effective_chat.id}"):
             job.schedule_removal()
             
@@ -315,11 +316,13 @@ async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data['repeat'] = 0
         data['answer_guessed'] = False
         
-        # Wait 3 seconds then send next question
         context.job_queue.run_once(send_next_question, 3, chat_id=update.effective_chat.id, data=data, name=f"quiz_{update.effective_chat.id}")
 
 # --- MAIN BOT SETUP ---
 def main():
+    # Start dummy web server for Render
+    threading.Thread(target=run_dummy_server, daemon=True).start()
+
     application = Application.builder().token(BOT_TOKEN).build()
 
     # Commands
@@ -340,7 +343,7 @@ def main():
     # Answer Handler (Any text that is not a command)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, answer_handler))
 
-    # Save group info when bot gets added or gets a message
+    # Save group info
     application.add_handler(MessageHandler(filters.ALL, lambda u, c: save_group(u.effective_chat.id, u.effective_chat.title) if u.effective_chat.type in ['group', 'supergroup'] else None))
 
     print("🤖 Bot is running...")

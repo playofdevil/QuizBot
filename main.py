@@ -19,7 +19,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 OWNER_ID = int(os.environ.get("OWNER_ID", 0))
 
-# --- DUMMY WEB SERVER FOR RENDER (To prevent Port Scan Timeout) ---
+# --- DUMMY WEB SERVER FOR RENDER ---
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -33,7 +33,6 @@ def run_dummy_server():
 
 # --- HELPER FUNCTIONS ---
 def parse_command(text):
-    """Splits 'Quiz@on' into ('quiz', 'on')"""
     if "@" in text:
         cmd, arg = text.split("@", 1)
         return cmd.lower(), arg.lower()
@@ -46,7 +45,7 @@ def get_questions(category):
     return []
 
 # --- QUIZ ENGINE LOGIC ---
-async def send_next_question(context: ContextTypes.DEFAULT_TYPE):
+async def send_question(context: ContextTypes.DEFAULT_TYPE):
     job = context.job
     chat_id = job.chat_id
     data = job.data
@@ -55,34 +54,35 @@ async def send_next_question(context: ContextTypes.DEFAULT_TYPE):
     repeat_count = data['repeat']
     question_list = get_questions(data['category'])
     
-    # If no more questions
     if q_index >= len(question_list):
-        await context.bot.send_message(chat_id, "🎉 **Quiz Completed!** All questions finished. Use `Quiz@on` to play again.")
+        await context.bot.send_message(chat_id, "🎉 *Quiz Completed!* All questions finished. Use `Quiz@on` to play again.", parse_mode='Markdown')
         context.chat_data.pop('quiz_active', None)
         return
 
     question = question_list[q_index]
 
-    # If repeat count reaches 3, reveal answer and move to next question
     if repeat_count >= 3:
         await context.bot.send_message(
             chat_id, 
-            f"⏰ **Time's up!** The correct answer was: **{question['a'].title()}**\n\nStarting next question... 🔄"
+            f"⏰ *Time's up!* The correct answer was: *{question['a'].title()}*\n\nStarting next question... 🔄",
+            parse_mode='Markdown'
         )
         data['q_index'] += 1
         data['repeat'] = 0
         job.data = data
-        context.job_queue.run_once(send_next_question, 2, chat_id=chat_id, data=data)
+        context.job_queue.run_once(send_question, 2, chat_id=chat_id, data=data)
         return
 
-    # Send the question
     msg = await context.bot.send_message(
         chat_id, 
-        f"❓ **{question['q']}**\n\nType your answer below! 👇\n_(Time: {data['speed']}s | Repeat: {repeat_count+1}/3)_"
+        f"❓ *{question['q']}*\n\nType your answer below! 👇\n_(Time: {data['speed']}s | Repeat: {repeat_count+1}/3)_",
+        parse_mode='Markdown'
     )
-    data['current_msg_id'] = msg.message_id
     data['repeat'] += 1
     job.data = data
+    
+    # Schedule the next repeat if no one answers
+    context.job_queue.run_once(send_question, data['speed'], chat_id=chat_id, data=data)
 
 async def start_quiz(chat_id, context: ContextTypes.DEFAULT_TYPE, category: str, speed: int = 15):
     questions = get_questions(category)
@@ -97,8 +97,6 @@ async def start_quiz(chat_id, context: ContextTypes.DEFAULT_TYPE, category: str,
         'speed': speed,
         'q_index': 0,
         'repeat': 0,
-        'current_msg_id': None,
-        'current_answer': None,
         'answer_guessed': False
     }
     
@@ -107,10 +105,12 @@ async def start_quiz(chat_id, context: ContextTypes.DEFAULT_TYPE, category: str,
     
     await context.bot.send_message(
         chat_id, 
-        f"🚀 **Quiz Started!** Category: **{category.title()}**\nSpeed: {speed}s | Repeat: 3 times\nLet's go! 🔥"
+        f"🚀 *Quiz Started!*\nCategory: *{category.title()}*\nSpeed: {speed}s | Repeat: 3 times\nLet's go! 🔥",
+        parse_mode='Markdown'
     )
     
-    context.job_queue.run_once(send_next_question, 2, chat_id=chat_id, data=data)
+    # Send first question immediately
+    context.job_queue.run_once(send_question, 1, chat_id=chat_id, data=data)
 
 # --- COMMAND HANDLERS ---
 
@@ -119,10 +119,10 @@ async def private_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_user(user.id, user.first_name)
     
     welcome_text = (
-        f"🎉 **Welcome to English Quiz Bot!** 🎉\n\n"
+        f"🎉 *Welcome to English Quiz Bot!* 🎉\n\n"
         f"Hey {user.first_name}! 👋\n"
-        f"I am an **English Quiz Bot** — made for **Groups** only! 🎯\n\n"
-        f"📌 **How to use me:**\n"
+        f"I am an *English Quiz Bot* — made for *Groups* only! 🎯\n\n"
+        f"📌 *How to use me:*\n"
         f"➕ Add me to your group\n"
         f"▶️ `Quiz@on` — Start the quiz\n"
         f"⏸️ `Quiz@off` — Stop the quiz\n"
@@ -152,7 +152,7 @@ async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🔴 Hard", callback_data="cat_hard")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("🎮 **Choose a Category to Start:**", reply_markup=reply_markup, parse_mode='Markdown')
+        await update.message.reply_text("🎮 *Choose a Category to Start:*", reply_markup=reply_markup, parse_mode='Markdown')
 
     elif arg == "off":
         if not context.chat_data.get('quiz_active'):
@@ -160,9 +160,7 @@ async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         context.chat_data.pop('quiz_active', None)
         context.chat_data.pop('quiz_data', None)
-        for job in context.job_queue.get_jobs_by_name(f"quiz_{update.effective_chat.id}"):
-            job.schedule_removal()
-        await update.message.reply_text("⏸️ **Quiz Stopped!** Thanks for playing. 🎉")
+        await update.message.reply_text("⏸️ *Quiz Stopped!* Thanks for playing. 🎉", parse_mode='Markdown')
 
 async def category_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -175,7 +173,7 @@ async def category_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     category = query.data.split("_")[1]
     speed = context.chat_data.get('group_speed', 15)
     
-    await query.edit_message_text(f"✅ Category **{category.title()}** selected!\nStarting quiz at {speed}s speed... 🚀", parse_mode='Markdown')
+    await query.edit_message_text(f"✅ Category *{category.title()}* selected!\nStarting quiz at {speed}s speed... 🚀", parse_mode='Markdown')
     await start_quiz(query.message.chat_id, context, category, speed)
 
 async def speed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -212,12 +210,12 @@ async def speed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     context.chat_data['group_speed'] = speed
-    await update.message.reply_text(f"⚡ Speed set to **{speed} seconds** for this group! (Repeat time updated) ⏱️", parse_mode='Markdown')
+    await update.message.reply_text(f"⚡ Speed set to *{speed} seconds* for this group! (Repeat time updated) ⏱️", parse_mode='Markdown')
 
 async def score_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     score = get_user_score(user.id)
-    await update.message.reply_text(f"🏆 **{user.first_name}**, your score is: **{score}** points! 🌟")
+    await update.message.reply_text(f"🏆 *{user.first_name}*, your score is: *{score}* points! 🌟", parse_mode='Markdown')
 
 async def score_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     top_users = get_top_10()
@@ -225,40 +223,36 @@ async def score_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📊 No scores yet! Start playing to get on the leaderboard. 🚀")
         return
     
-    text = "🥇 **TOP 10 LEADERBOARD** 🥇\n\n"
+    text = "🥇 *TOP 10 LEADERBOARD* 🥇\n\n"
     for idx, user in enumerate(top_users, 1):
         name = user.get('username', 'Unknown')
         score = user.get('score', 0)
         medal = "🥇" if idx == 1 else "🥈" if idx == 2 else "🥉" if idx == 3 else f"{idx}."
-        text += f"{medal} **{name}** — {score} points\n"
+        text += f"{medal} *{name}* — {score} points\n"
     
     await update.message.reply_text(text, parse_mode='Markdown')
 
 async def stats_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
-        await update.message.reply_text("❌ This command is only for the Bot Owner! 👑")
-        return
+        return await update.message.reply_text("❌ This command is only for the Bot Owner! 👑")
     count = get_total_users()
-    await update.message.reply_text(f"👥 **Total Users:** {count}", parse_mode='Markdown')
+    await update.message.reply_text(f"👥 *Total Users:* {count}", parse_mode='Markdown')
 
 async def stats_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
-        await update.message.reply_text("❌ This command is only for the Bot Owner! 👑")
-        return
+        return await update.message.reply_text("❌ This command is only for the Bot Owner! 👑")
     count = get_total_groups()
-    await update.message.reply_text(f"👥 **Total Groups:** {count}", parse_mode='Markdown')
+    await update.message.reply_text(f"👥 *Total Groups:* {count}", parse_mode='Markdown')
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
-        await update.message.reply_text("❌ This command is only for the Bot Owner! 👑")
-        return
+        return await update.message.reply_text("❌ This command is only for the Bot Owner! 👑")
     
     text = update.message.text
     cmd, arg = parse_command(text)
     
     if not arg:
-        await update.message.reply_text("⚠️ Usage: `Broadcast@Your message here`")
-        return
+        return await update.message.reply_text("⚠️ Usage: `Broadcast@Your message here`")
 
     groups = get_all_groups()
     users = get_all_users()
@@ -270,19 +264,19 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     for group in groups:
         try:
-            await context.bot.send_message(group['chat_id'], f"📢 **Broadcast from Owner:**\n\n{arg}", parse_mode='Markdown')
+            await context.bot.send_message(group['chat_id'], f"📢 *Broadcast from Owner:*\n\n{arg}", parse_mode='Markdown')
             success += 1
         except Exception:
             failed += 1
             
     for user in users:
         try:
-            await context.bot.send_message(user['user_id'], f"📢 **Broadcast from Owner:**\n\n{arg}", parse_mode='Markdown')
+            await context.bot.send_message(user['user_id'], f"📢 *Broadcast from Owner:*\n\n{arg}", parse_mode='Markdown')
             success += 1
         except Exception:
             failed += 1
             
-    await status_msg.edit_text(f"✅ **Broadcast Complete!**\n\nSent: {success}\nFailed: {failed}")
+    await status_msg.edit_text(f"✅ *Broadcast Complete!*\n\nSent: {success}\nFailed: {failed}", parse_mode='Markdown')
 
 async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.chat_data.get('quiz_active'):
@@ -307,8 +301,9 @@ async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data['answer_guessed'] = True
         context.chat_data['quiz_data'] = data
         
-        await update.message.reply_text(f"✅ **Correct, {user.first_name}!** 🎉 +1 Point!\nAnswer: **{correct_answer.title()}**", parse_mode='Markdown')
+        await update.message.reply_text(f"✅ *Correct, {user.first_name}!* 🎉 +1 Point!\nAnswer: *{correct_answer.title()}*", parse_mode='Markdown')
         
+        # Cancel pending repeat jobs
         for job in context.job_queue.get_jobs_by_name(f"quiz_{update.effective_chat.id}"):
             job.schedule_removal()
             
@@ -316,19 +311,17 @@ async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data['repeat'] = 0
         data['answer_guessed'] = False
         
-        context.job_queue.run_once(send_next_question, 3, chat_id=update.effective_chat.id, data=data, name=f"quiz_{update.effective_chat.id}")
+        # Move to next question in 2 seconds
+        context.job_queue.run_once(send_question, 2, chat_id=update.effective_chat.id, data=data, name=f"quiz_{update.effective_chat.id}")
 
 # --- MAIN BOT SETUP ---
 def main():
-    # Start dummy web server for Render
     threading.Thread(target=run_dummy_server, daemon=True).start()
 
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # Commands
     application.add_handler(CommandHandler("start", private_welcome, filters=filters.ChatType.PRIVATE))
     
-    # Custom text handlers for Quiz@, Speed@, Score@, Stats@, Broadcast@
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^Quiz@(on|off)$'), quiz_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^Speed@'), speed_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^Score@me$'), score_me))
@@ -337,13 +330,8 @@ def main():
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^Stats@groups$'), stats_groups))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^Broadcast@'), broadcast))
     
-    # Callback for category buttons
     application.add_handler(CallbackQueryHandler(category_selected, pattern=r'^cat_'))
-    
-    # Answer Handler (Any text that is not a command)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, answer_handler))
-
-    # Save group info
     application.add_handler(MessageHandler(filters.ALL, lambda u, c: save_group(u.effective_chat.id, u.effective_chat.title) if u.effective_chat.type in ['group', 'supergroup'] else None))
 
     print("🤖 Bot is running...")

@@ -1,20 +1,23 @@
 import os
 from pymongo import MongoClient
 
-# Render ke environment variables se link aayega
 MONGO_URI = os.environ.get("MONGO_URI")
 client = MongoClient(MONGO_URI)
 db = client['QuizBotDB']
 
-# Collections (Tables)
 users_col = db['users']
 groups_col = db['groups']
 scores_col = db['scores']
+permissions_col = db['permissions']
+bans_col = db['bans']
+mutes_col = db['mutes']
+custom_questions_col = db['custom_questions']
+global_settings_col = db['global_settings']
 
-def save_user(user_id, username):
+def save_user(user_id, username, first_name):
     users_col.update_one(
         {"user_id": user_id},
-        {"$set": {"username": username}},
+        {"$set": {"username": username, "first_name": first_name}},
         upsert=True
     )
 
@@ -25,20 +28,28 @@ def save_group(chat_id, title):
         upsert=True
     )
 
-def add_score(user_id, username, points=1):
+def add_score(user_id, chat_id, username, points, is_correct=True):
+    # Global Score
     scores_col.update_one(
-        {"user_id": user_id},
-        {"$inc": {"score": points}, "$set": {"username": username}},
+        {"user_id": user_id, "chat_id": "global"},
+        {"$inc": {"score": points, "correct": 1 if is_correct else 0}, "$set": {"username": username}},
+        upsert=True
+    )
+    # Group Score
+    scores_col.update_one(
+        {"user_id": user_id, "chat_id": chat_id},
+        {"$inc": {"score": points, "correct": 1 if is_correct else 0}, "$set": {"username": username}},
         upsert=True
     )
 
-def get_user_score(user_id):
-    user = scores_col.find_one({"user_id": user_id})
-    return user['score'] if user else 0
+def get_user_profile(user_id, chat_id="global"):
+    user = scores_col.find_one({"user_id": user_id, "chat_id": chat_id})
+    if user:
+        return user
+    return {"score": 0, "correct": 0}
 
-def get_top_10():
-    # Score ke hisaab se top 10 users
-    top_users = scores_col.find().sort("score", -1).limit(10)
+def get_top_10(chat_id="global"):
+    top_users = scores_col.find({"chat_id": chat_id}).sort("score", -1).limit(10)
     return list(top_users)
 
 def get_total_users():
@@ -52,3 +63,63 @@ def get_all_groups():
 
 def get_all_users():
     return list(users_col.find({}))
+
+# --- Permissions ---
+def add_permission(user_id, chat_id):
+    permissions_col.update_one({"user_id": user_id, "chat_id": chat_id}, {"$set": {"status": True}}, upsert=True)
+
+def remove_permission(user_id, chat_id):
+    permissions_col.delete_one({"user_id": user_id, "chat_id": chat_id})
+
+def check_permission(user_id, chat_id):
+    perm = permissions_col.find_one({"user_id": user_id, "chat_id": chat_id})
+    return bool(perm)
+
+# --- Ban / Mute ---
+def ban_user(user_id):
+    bans_col.update_one({"user_id": user_id}, {"$set": {"banned": True}}, upsert=True)
+
+def unban_user(user_id):
+    bans_col.delete_one({"user_id": user_id})
+
+def is_banned(user_id):
+    return bool(bans_col.find_one({"user_id": user_id}))
+
+def mute_user(user_id, chat_id):
+    mutes_col.update_one({"user_id": user_id, "chat_id": chat_id}, {"$set": {"muted": True}}, upsert=True)
+
+def unmute_user(user_id, chat_id):
+    mutes_col.delete_one({"user_id": user_id, "chat_id": chat_id})
+
+def is_muted(user_id, chat_id):
+    return bool(mutes_col.find_one({"user_id": user_id, "chat_id": chat_id}))
+
+# --- Reset ---
+def reset_group_scores(chat_id):
+    scores_col.delete_many({"chat_id": chat_id})
+
+def reset_all_scores():
+    scores_col.delete_many({})
+
+# --- Global State ---
+def set_global_state(state):
+    global_settings_col.update_one({"_id": "global_quiz"}, {"$set": {"state": state}}, upsert=True)
+
+def get_global_state():
+    state = global_settings_col.find_one({"_id": "global_quiz"})
+    return state['state'] if state else True
+
+# --- Custom Questions ---
+def add_custom_question(category, question, answer):
+    custom_questions_col.update_one(
+        {"category": category, "question": question},
+        {"$set": {"answer": answer}},
+        upsert=True
+    )
+
+def del_custom_question(category, question):
+    result = custom_questions_col.delete_one({"category": category, "question": question})
+    return result.deleted_count > 0
+
+def get_custom_questions(category):
+    return list(custom_questions_col.find({"category": category}))

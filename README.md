@@ -1,34 +1,36 @@
-# QuizBot
-Free Quiz Bot
+# 🎯 English Quiz Bot Guide
 
-# 🎯 English Quiz Bot
+Yeh bot Telegram groups ke liye ekdum perfect hai. Isme aapko saare commands ki list mil jayegi.
 
-A Telegram Quiz Bot made for Groups. 
+## 👑 BOT OWNER COMMANDS (Sirf Aapke Liye)
+- `Stats@users` : Total kitne users hain.
+- `Stats@groups` : Total kitne groups hain.
+- `Broadcast@msg` : Sabhi users/groups ko message bhejna.
+- `Global@on` / `Global@off` : Bot ko sabke liye band/chalu karna.
+- `Reset@all` : Global leaderboard (sabka score) 0 karna.
+- `Reset@group` : Sirf current group ka score 0 karna.
+- `AddQ@category@Question@Answer` : Naya sawal add karna (category: easy, medium, hard).
+- `DelQ@category@Question` : Sawal delete karna.
+- `Ban@` (Reply/Tag) : User ko bot se ban karna.
+- `Unban@` (Reply/Tag) : User ko unban karna.
+- `Mute@` (Reply/Tag) : User ko us group mein mute karna.
+- `Unmute@` (Reply/Tag) : User ko unmute karna.
 
-## Features
-- 3 Categories: Easy, Medium, Hard (100 Q&A each)
-- Custom Speed System: `Speed@10s`, `Speed@1m`
-- 3x Repeat Logic if no one answers
-- Top 10 Leaderboard (`Score@all`)
-- Admin Only Speed Change
-- Broadcast System for Owner
+## 🛡️ GROUP ADMIN / PERMITTED COMMANDS
+- `Quiz@on` / `Quiz@off` : Quiz start/stop karna.
+- `Speed@5s` (ya 10s, 1m) : Speed set karna.
+- `Skip@` : Current question skip karna.
+- `Hint@` : Question ka hint dena.
+- `Yes@on` (Reply/Tag) : Kisi user ko permission dena.
+- `No@off` (Reply/Tag) : User ki permission hatana.
 
-## Deployment on Render
+## 👤 ALL USERS COMMANDS
+- `Score@me` : Apna score dekhna.
+- `Score@group` : Group ka Top 10.
+- `Score@all` : Global Top 10.
+- `Profile@username` (ya reply) : Kisi bhi user ka profile, correct answers aur score dekhna.
 
-1. Create a **Web Service** on Render.
-2. Connect your GitHub repository.
-3. Set the following **Environment Variables**:
-   - `BOT_TOKEN`: Your Telegram Bot Token from BotFather.
-   - `OWNER_ID`: Your Telegram User ID.
-   - `MONGO_URI`: Your MongoDB Connection String.
-4. **Build Command:** `pip install -r requirements.txt`
-5. **Start Command:** `python main.py`
-
-## Commands
-- `Quiz@on` - Start Quiz
-- `Quiz@off` - Stop Quiz
-- `Speed@10s` - Change Speed (Admins only)
-- `Score@me` - Your Score
-- `Score@all` - Top 10 Leaderboard
-- `Stats@users` / `Stats@groups` - Bot Stats (Owner only)
-- `Broadcast@message` - Send message to all (Owner only)
+## 🏆 POINT SYSTEM
+- 1st Attempt (Fastest) = 100 Points
+- 2nd Attempt = 50 Points
+- 3rd Attempt = 20 Points

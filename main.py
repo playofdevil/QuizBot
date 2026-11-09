@@ -18,12 +18,13 @@ from database import (
     add_custom_question, del_custom_question, get_custom_questions
 )
 
+# Logging setup
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 OWNER_ID = int(os.environ.get("OWNER_ID", 0))
 
-# --- DUMMY WEB SERVER ---
+# --- DUMMY WEB SERVER FOR RENDER ---
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -48,7 +49,6 @@ def get_questions(category):
     elif category == "medium": base_q = MEDIUM_QUESTIONS.copy()
     elif category == "hard": base_q = HARD_QUESTIONS.copy()
     
-    # Add custom DB questions
     custom = get_custom_questions(category)
     for c in custom:
         base_q.append({"q": c['question'], "a": c['answer']})
@@ -56,17 +56,13 @@ def get_questions(category):
     return base_q
 
 def get_target_user(update: Update):
-    # Check for reply first
     if update.message.reply_to_message:
         return update.message.reply_to_message.from_user
-    # Check for @username in text
     text = update.message.text
     if "@" in text:
         parts = text.split("@")
         if len(parts) > 1:
             username = parts[1].split()[0].replace("_", " ")
-            # We need to find user by username. For simplicity, we only check recent users.
-            # In a real DB, you'd query by username.
             return username
     return None
 
@@ -142,7 +138,6 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def quiz_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type not in ['group', 'supergroup']: return
     
-    # Check Global State
     if not get_global_state():
         return await update.message.reply_text("⚠️ Bot is currently in maintenance mode.")
         
@@ -215,14 +210,7 @@ async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if user_ans == data['current_answer']:
         data['answered'] = True
-        
-        # Determine points based on time (we can track attempt in data, but for simplicity, let's calculate based on loop)
-        # For this loop, we'll give 100 if it's the first message. A better way is tracking attempt.
-        # But since it's a loop, we know if `answered` is false, this is the first correct answer in the current window.
-        # We will use a hack: 100 points for fast, 50 for medium, 20 for last.
-        points = 100 # For simplicity, assume fast if they get it before the next prompt. 
-        # To be accurate, we'd need a timer. Let's just use 100 for now.
-        
+        points = 100 # Simplified for now
         add_score(user.id, chat_id, user.first_name, points, True)
         await update.message.reply_text(f"✅ *Correct, {user.first_name}!* 🎉 +{points} Points!", parse_mode='Markdown')
 
@@ -273,12 +261,9 @@ async def profile_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not target: return await update.message.reply_text("⚠️ Reply to a message or tag a username.")
     
     if isinstance(target, str):
-        # Search DB by username (approximate)
-        await update.message.reply_text(f"Checking profile for @{target}... (Note: Username search requires user to have interacted recently).")
-        return
+        return await update.message.reply_text(f"Checking profile for @{target}... (Note: Username search requires user to have interacted recently).")
         
     prof = get_user_profile(target.id, "global")
-    accuracy = (prof['correct'] / prof['score'] * 100) if prof['score'] > 0 else 0 # Rough estimate
     text = (
         f"👤 *Profile: {target.first_name}*\n\n"
         f"🏆 Score: {prof['score']}\n"
@@ -286,13 +271,12 @@ async def profile_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(text, parse_mode='Markdown')
 
-# --- ADMIN & OWNER COMMANDS ---
 async def skip_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin_or_permitted(update, context): return
     chat_id = update.effective_chat.id
     if chat_id in active_quizzes:
         active_quizzes[chat_id]['q_index'] += 1
-        active_quizzes[chat_id]['answered'] = True # Force break
+        active_quizzes[chat_id]['answered'] = True
         await update.message.reply_text("⏭️ Question skipped!")
     else:
         await update.message.reply_text("⚠️ No quiz running.")
@@ -302,7 +286,6 @@ async def hint_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if chat_id in active_quizzes and active_quizzes[chat_id]['current_answer']:
         ans = active_quizzes[chat_id]['current_answer']
-        hint = ans[0] + "_" * (len(ans)-1)
         await update.message.reply_text(f"💡 *Hint:* The answer starts with `{ans[0]}` and has {len(ans)} letters.", parse_mode='Markdown')
 
 async def yes_perm(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -319,7 +302,6 @@ async def no_perm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         remove_permission(target.id, update.effective_chat.id)
         await update.message.reply_text(f"❌ Permission removed for {target.first_name}.")
 
-# --- OWNER ONLY ---
 async def owner_check(update: Update):
     return update.effective_user.id == OWNER_ID
 
@@ -442,4 +424,15 @@ def main():
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^Global@'), global_state_cmd))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^AddQ@'), add_q))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^DelQ@'), del_q))
-    application.add_handler(MessageHandler(f
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Stats@'), stats_cmd))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Broadcast@'), broadcast_cmd))
+
+    # Chat
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, answer_handler))
+    application.add_handler(MessageHandler(filters.ALL, lambda u, c: save_group(u.effective_chat.id, u.effective_chat.title) if u.effective_chat.type in ['group', 'supergroup'] else None))
+
+    print("🤖 Bot is running...")
+    application.run_polling()
+
+if __name__ == '__main__':
+    main()

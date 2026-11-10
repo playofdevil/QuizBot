@@ -3,34 +3,33 @@
 Yeh bot Telegram groups ke liye ekdum perfect hai. Isme aapko saare commands ki list mil jayegi.
 
 ## 👑 BOT OWNER COMMANDS (Sirf Aapke Liye)
-- `Stats@users` : Total kitne users hain.
-- `Stats@groups` : Total kitne groups hain.
-- `Broadcast@msg` : Sabhi users/groups ko message bhejna.
-- `Global@on` / `Global@off` : Bot ko sabke liye band/chalu karna.
-- `Reset@all` : Global leaderboard (sabka score) 0 karna.
-- `Reset@group` : Sirf current group ka score 0 karna.
-- `AddQ@category@Question@Answer` : Naya sawal add karna (category: easy, medium, hard).
+- `.on` / `.off` : Bot ko kisi bhi group mein on/off karna.
+- `BroadcastAll@msg` : Sabhi users aur groups ko message bhejna.
+- `BroadcastGroups@msg` : Sirf groups ko message bhejna.
+- `BroadcastUsers@msg` : Sirf private users ko message bhejna.
+- `ListGroups@` : Saare groups ki ID aur naam dekhna.
+- `Stats@users` / `Stats@groups` : Total users aur groups.
+- `Reset@all` / `Reset@group` : Leaderboard 0 karna.
+- `AddQ@category@Question@Answer` : Naya sawal add karna.
 - `DelQ@category@Question` : Sawal delete karna.
-- `Ban@` (Reply/Tag) : User ko bot se ban karna.
-- `Unban@` (Reply/Tag) : User ko unban karna.
-- `Mute@` (Reply/Tag) : User ko us group mein mute karna.
-- `Unmute@` (Reply/Tag) : User ko unmute karna.
+- `Ban@` / `Unban@` / `Mute@` / `Unmute@` : (Reply/Tag se) User ko control karna.
 
 ## 🛡️ GROUP ADMIN / PERMITTED COMMANDS
-- `Quiz@on` / `Quiz@off` : Quiz start/stop karna.
+- `Quiz@on` / `Quiz@off` : Quiz start/stop.
 - `Speed@5s` (ya 10s, 1m) : Speed set karna.
-- `Skip@` : Current question skip karna.
-- `Hint@` : Question ka hint dena.
+- `Skip@` : Current question skip (Sahi jawab batayega).
+- `Hint@` : Question ka hint.
 - `Yes@on` (Reply/Tag) : Kisi user ko permission dena.
-- `No@off` (Reply/Tag) : User ki permission hatana.
+- `No@off` (Reply/Tag) : Permission hatana.
 
 ## 👤 ALL USERS COMMANDS
-- `Score@me` : Apna score dekhna.
+- `Score@me` : Apna score.
 - `Score@group` : Group ka Top 10.
 - `Score@all` : Global Top 10.
-- `Profile@username` (ya reply) : Kisi bhi user ka profile, correct answers aur score dekhna.
+- `Profile@username` (ya reply) : Kisi ka profile dekhna.
+- `help@` : Commands ka guide dekhna.
 
 ## 🏆 POINT SYSTEM
-- 1st Attempt (Fastest) = 100 Points
-- 2nd Attempt = 50 Points
-- 3rd Attempt = 20 Points
+- 10 second ke andar = 100 Points
+- 20 second ke andar = 50 Points
+- 20 second ke baad = 20 Points

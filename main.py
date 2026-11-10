@@ -423,7 +423,7 @@ async def broadcast_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def broadcast_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await owner_check(update): return
     text = update.message.text.replace("BroadcastGroups@", "", 1)
-        if not text: return await update.message.reply_text("⚠️ Usage: `BroadcastGroups@msg`")
+    if not text: return await update.message.reply_text("⚠️ Usage: `BroadcastGroups@msg`")
     groups = get_all_groups()
     for g in groups:
         try:

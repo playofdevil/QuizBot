@@ -396,25 +396,40 @@ async def broadcast_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await owner_check(update): return
     text = update.message.text.replace("BroadcastAll@", "", 1)
     if not text: return await update.message.reply_text("⚠️ Usage: `BroadcastAll@msg`")
+    
     groups = get_all_groups()
     users = get_all_users()
     await update.message.reply_text(f"📢 Broadcasting to {len(groups)} groups and {len(users)} users...")
+    
     for g in groups:
-        try: await context.bot.send_message(g['chat_id'], f"📢 {text}"); await asyncio.sleep(1)
-        except: pass
+        try:
+            await context.bot.send_message(g['chat_id'], f"📢 {text}")
+        except:
+            pass
+        await asyncio.sleep(1)
+        
     for u in users:
-        try: await context.bot.send_message(u['user_id'], f"📢 {text}"); await asyncio.sleep(1)
-        except: pass
+        try:
+            await context.bot.send_message(u['user_id'], f"📢 {text}")
+        except:
+            pass
+        await asyncio.sleep(1)
+        
     await update.message.reply_text("✅ Broadcast All Sent!")
 
 async def broadcast_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await owner_check(update): return
     text = update.message.text.replace("BroadcastGroups@", "", 1)
     if not text: return await update.message.reply_text("⚠️ Usage: `BroadcastGroups@msg`")
+    
     groups = get_all_groups()
     for g in groups:
-        try: await context.bot.send_message(g['chat_id'], f"📢 {text}"); await asyncio.sleep(1)
-        except: pass
+        try:
+            await context.bot.send_message(g['chat_id'], f"📢 {text}")
+        except:
+            pass
+        await asyncio.sleep(1)
+        
     await update.message.reply_text("✅ Sent to groups!")
 
 async def broadcast_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -424,12 +439,12 @@ async def broadcast_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     users = get_all_users()
     for u in users:
-          try:
+        try:
             await context.bot.send_message(u['user_id'], f"📢 {text}")
-            await asyncio.sleep(1)
-        except Exception:
+        except:
             pass
-            
+        await asyncio.sleep(1)
+        
     await update.message.reply_text("✅ Sent to users!")
 
 async def owner_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -446,8 +461,10 @@ async def list_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await owner_check(update): return
     groups = get_all_groups()
     if not groups: return await update.message.reply_text("No groups found.")
+    
     text = "📋 *GROUPS LIST*\n\n"
-    for g in groups: text += f"• {g.get('title', 'Unknown')} : `{g['chat_id']}`\n"
+    for g in groups: 
+        text += f"• {g.get('title', 'Unknown')} : `{g['chat_id']}`\n"
     await update.message.reply_text(text, parse_mode='Markdown')
 
 # --- MAIN ---

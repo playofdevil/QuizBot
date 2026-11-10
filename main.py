@@ -1,0 +1,483 @@
+import os
+import random
+import logging
+import threading
+import asyncio
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
+)
+from questions import EASY_QUESTIONS, MEDIUM_QUESTIONS, HARD_QUESTIONS
+from database import (
+    save_user, save_group, add_score, get_user_profile, get_top_10, 
+    get_total_users, get_total_groups, get_all_groups, get_all_users,
+    add_permission, remove_permission, check_permission,
+    ban_user, unban_user, is_banned, mute_user, unmute_user, is_muted,
+    reset_group_scores, reset_all_scores, set_global_state, get_global_state,
+    add_custom_question, del_custom_question, get_custom_questions
+)
+
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+OWNER_ID = int(os.environ.get("OWNER_ID", 0))
+
+# --- DUMMY WEB SERVER ---
+class DummyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is alive!")
+
+def run_dummy_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(('0.0.0.0', port), DummyHandler)
+    server.serve_forever()
+
+# --- HELPER FUNCTIONS ---
+def parse_command(text):
+    if "@" in text:
+        cmd, arg = text.split("@", 1)
+        return cmd.lower(), arg.strip()
+    return text.lower(), None
+
+def get_questions(category):
+    base_q = []
+    if category == "easy": base_q = EASY_QUESTIONS.copy()
+    elif category == "medium": base_q = MEDIUM_QUESTIONS.copy()
+    elif category == "hard": base_q = HARD_QUESTIONS.copy()
+    
+    custom = get_custom_questions(category)
+    for c in custom:
+        base_q.append({"q": c['question'], "a": c['answer']})
+    return base_q
+
+def get_target_user(update: Update):
+    if update.message.reply_to_message:
+        return update.message.reply_to_message.from_user
+    text = update.message.text
+    if "@" in text:
+        parts = text.split("@")
+        if len(parts) > 1:
+            username = parts[1].split()[0].replace("_", " ")
+            return username
+    return None
+
+async def is_admin_or_permitted(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    if user_id == OWNER_ID: return True
+    try:
+        member = await update.effective_chat.get_member(user_id)
+        if member.status in ['administrator', 'creator']: return True
+    except: pass
+    return check_permission(user_id, chat_id)
+
+async def owner_check(update: Update): return update.effective_user.id == OWNER_ID
+
+# --- QUIZ ENGINE ---
+active_quizzes = {}
+
+async def quiz_loop(chat_id, context: ContextTypes.DEFAULT_TYPE, data):
+    await asyncio.sleep(1)
+    
+    while data['active'] and data['q_index'] < len(data['questions']):
+        question = data['questions'][data['q_index']]
+        data['answered'] = False
+        data['current_answer'] = question['a'].lower().strip()
+        data['start_time'] = time.time()
+        
+        for attempt in range(3):
+            if data['answered'] or not data['active']: break
+            
+            msg_text = (
+                f"┏━━━━━━━━━━━━━━━┓\n"
+                f"   ✨ 𝗤𝗨𝗜𝗭 𝗤𝗨𝗘𝗦𝗧𝗜𝗢𝗡 ✨\n"
+                f"┗━━━━━━━━━━━━━━━┛\n\n"
+                f"📝 *{question['q']}*\n\n"
+                f"💡 Type your answer below! 👇\n"
+                f"_(Attempt {attempt+1}/3)_"
+            )
+            await context.bot.send_message(chat_id, msg_text, parse_mode='Markdown')
+            
+            wait_time = data['speed']
+            for _ in range(wait_time):
+                if data['answered'] or not data['active']: break
+                await asyncio.sleep(1)
+            
+        if not data['answered'] and data['active']:
+            await context.bot.send_message(chat_id, f"⏰ *Time's up!* The correct answer was: *{question['a'].title()}*", parse_mode='Markdown')
+            await asyncio.sleep(2)
+        
+        data['q_index'] += 1
+        await asyncio.sleep(1)
+
+    if data['active']:
+        await context.bot.send_message(chat_id, "🎉 *Quiz Completed!* All questions finished.", parse_mode='Markdown')
+    active_quizzes.pop(chat_id, None)
+
+# --- COMMANDS ---
+async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    save_user(user.id, user.username, user.first_name)
+    
+    welcome_text = (
+        f"╔══════════════════════╗\n"
+        f"   🌟 𝗘𝗡𝗚𝗟𝗜𝗦𝗛 𝗤𝗨𝗜𝗭 𝗕𝗢𝗧 🌟\n"
+        f"╚══════════════════════╝\n\n"
+        f"Hello *{user.first_name}*! 👋\n"
+        f"Welcome to the ultimate quiz experience! 🎯\n\n"
+        f"✨ *Click the button below to see all my commands!*"
+    )
+    keyboard = [
+        [InlineKeyboardButton("📖 View Commands (Help)", callback_data="show_help")],
+        [InlineKeyboardButton("➕ Add to Group", url=f"https://t.me/{context.bot.username}?startgroup=true")]
+    ]
+    await update.message.reply_text(welcome_text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = (
+        f"📚 *𝗕𝗢𝗧 𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦 𝗚𝗨𝗜𝗗𝗘*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👤 *𝗡𝗢𝗥𝗠𝗔𝗟 𝗨𝗦𝗘𝗥 𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦:*\n"
+        f"• `Score@me` — Apna score dekhein.\n"
+        f"• `Score@group` — Group ka Top 10.\n"
+        f"• `Score@all` — Global Top 10.\n"
+        f"• `Profile@username` (ya reply) — Kisi ka profile dekhein.\n"
+        f"• `Report@` — Galat question report karein.\n\n"
+        f"🛡️ *𝗚𝗥𝗢𝗨𝗣 𝗔𝗗𝗠𝗜𝗡 𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦:*\n"
+        f"• `Quiz@on` / `Quiz@off` — Quiz start/stop.\n"
+        f"• `Speed@10s` — Speed set karein.\n"
+        f"• `Skip@` — Question skip karein.\n"
+        f"• `Hint@` — Hint lein.\n"
+        f"• `Yes@on` (Reply) — Kisi ko permission dein.\n"
+        f"• `No@off` (Reply) — Permission hatayein."
+    )
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.edit_text(help_text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back_start")]]))
+    else:
+        await update.message.reply_text(help_text, parse_mode='Markdown')
+
+async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    welcome_text = (
+        f"╔══════════════════════╗\n"
+        f"   🌟 𝗘𝗡𝗚𝗟𝗜𝗦𝗛 𝗤𝗨𝗜𝗭 𝗕𝗢𝗧 🌟\n"
+        f"╚══════════════════════╝\n\n"
+        f"Hello *{user.first_name}*! 👋\n"
+        f"Welcome to the ultimate quiz experience! 🎯\n\n"
+        f"✨ *Click the button below to see all my commands!*"
+    )
+    keyboard = [
+        [InlineKeyboardButton("📖 View Commands (Help)", callback_data="show_help")],
+        [InlineKeyboardButton("➕ Add to Group", url=f"https://t.me/{context.bot.username}?startgroup=true")]
+    ]
+    await query.message.edit_text(welcome_text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def quiz_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type not in ['group', 'supergroup']: return
+    if not get_global_state(): return await update.message.reply_text("⚠️ Bot is in maintenance.")
+    if not await is_admin_or_permitted(update, context): return await update.message.reply_text("❌ Only Admins can start/stop the quiz.")
+
+    cmd, arg = parse_command(update.message.text)
+    chat_id = update.effective_chat.id
+    
+    if arg == "on":
+        if chat_id in active_quizzes: return await update.message.reply_text("⚠️ Quiz is already running!")
+        keyboard = [
+            [InlineKeyboardButton("🟢 Easy", callback_data="cat_easy")],
+            [InlineKeyboardButton("🟡 Medium", callback_data="cat_medium")],
+            [InlineKeyboardButton("🔴 Hard", callback_data="cat_hard")]
+        ]
+        await update.message.reply_text("🎮 *Choose a Category to Start:*", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+    elif arg == "off":
+        if chat_id in active_quizzes:
+            active_quizzes[chat_id]['active'] = False
+            await update.message.reply_text("⏸️ *Quiz Stopped!*", parse_mode='Markdown')
+
+async def category_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    chat_id = query.message.chat_id
+    if chat_id in active_quizzes: return await query.edit_message_text("⚠️ Quiz already running!")
+
+    category = query.data.split("_")[1]
+    speed = context.chat_data.get('group_speed', 15)
+    questions = get_questions(category)
+    random.shuffle(questions)
+    
+    data = {'active': True, 'category': category, 'speed': speed, 'questions': questions, 'q_index': 0, 'answered': False, 'current_answer': None, 'start_time': 0}
+    active_quizzes[chat_id] = data
+    await query.edit_message_text(f"✅ Category *{category.title()}* selected!\n🚀 *Quiz Started!* Speed: {speed}s", parse_mode='Markdown')
+    asyncio.create_task(quiz_loop(chat_id, context, data))
+
+async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type not in ['group', 'supergroup']: return
+    chat_id = update.effective_chat.id
+    if chat_id not in active_quizzes: return
+    
+    data = active_quizzes[chat_id]
+    user = update.effective_user
+    
+    if not data['active'] or data['answered'] or not data['current_answer']: return
+    if is_banned(user.id) or is_muted(user.id, chat_id): return
+    
+    user_ans = update.message.text.lower().strip()
+    
+    if user_ans == data['current_answer']:
+        data['answered'] = True
+        time_taken = time.time() - data['start_time']
+        if time_taken <= 10: points = 100
+        elif time_taken <= 20: points = 50
+        else: points = 20
+            
+        add_score(user.id, chat_id, user.first_name, points, True)
+        await update.message.reply_text(f"✅ *Correct, {user.first_name}!* 🎉\n⏱️ Time: {int(time_taken)}s | +{points} Points!", parse_mode='Markdown')
+
+async def skip_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin_or_permitted(update, context): return
+    chat_id = update.effective_chat.id
+    if chat_id in active_quizzes:
+        data = active_quizzes[chat_id]
+        if data['current_answer']:
+            await update.message.reply_text(f"⏭️ *Question Skipped!* The correct answer was: *{data['current_answer'].title()}*", parse_mode='Markdown')
+        data['q_index'] += 1
+        data['answered'] = True
+    else:
+        await update.message.reply_text("⚠️ No quiz running.")
+
+async def hint_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin_or_permitted(update, context): return
+    chat_id = update.effective_chat.id
+    if chat_id in active_quizzes and active_quizzes[chat_id]['current_answer']:
+        ans = active_quizzes[chat_id]['current_answer']
+        await update.message.reply_text(f"💡 *Hint:* Answer starts with `{ans[0]}` and has {len(ans)} letters.", parse_mode='Markdown')
+
+async def yes_perm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin_or_permitted(update, context): return
+    target = get_target_user(update)
+    if target and not isinstance(target, str):
+        add_permission(target.id, update.effective_chat.id)
+        await update.message.reply_text(f"✅ Permission granted to {target.first_name}.")
+
+async def no_perm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin_or_permitted(update, context): return
+    target = get_target_user(update)
+    if target and not isinstance(target, str):
+        remove_permission(target.id, update.effective_chat.id)
+        await update.message.reply_text(f"❌ Permission removed for {target.first_name}.")
+
+async def speed_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin_or_permitted(update, context): return await update.message.reply_text("❌ Only Admins can change speed.")
+    cmd, arg = parse_command(update.message.text)
+    if not arg: return await update.message.reply_text("⚠️ Usage: `Speed@10s`")
+    try:
+        speed = int(arg[:-1]) * (60 if arg.endswith('m') else 1)
+        if speed < 5 or speed > 120: raise ValueError
+    except: return await update.message.reply_text("❌ Invalid format.")
+    context.chat_data['group_speed'] = speed
+    await update.message.reply_text(f"⚡ Speed set to *{speed} seconds*.", parse_mode='Markdown')
+
+async def score_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    prof = get_user_profile(user.id, "global")
+    await update.message.reply_text(f"🏆 *{user.first_name}*, your score is: *{prof['score']}* points!", parse_mode='Markdown')
+
+async def score_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    top = get_top_10("global")
+    if not top: return await update.message.reply_text("📊 No scores yet!")
+    text = "🥇 *GLOBAL TOP 10* 🥇\n\n"
+    for idx, u in enumerate(top, 1): text += f"{idx}. *{u['username']}* — {u['score']} pts\n"
+    await update.message.reply_text(text, parse_mode='Markdown')
+
+async def score_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    top = get_top_10(update.effective_chat.id)
+    if not top: return await update.message.reply_text("📊 No scores in this group!")
+    text = f"🥇 *GROUP TOP 10* 🥇\n\n"
+    for idx, u in enumerate(top, 1): text += f"{idx}. *{u['username']}* — {u['score']} pts\n"
+    await update.message.reply_text(text, parse_mode='Markdown')
+
+async def profile_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    target = get_target_user(update)
+    if not target: return await update.message.reply_text("⚠️ Reply to a message or tag a username.")
+    if isinstance(target, str): return await update.message.reply_text(f"Checking profile for @{target}...")
+    prof = get_user_profile(target.id, "global")
+    await update.message.reply_text(f"👤 *Profile: {target.first_name}*\n🏆 Score: {prof['score']}\n✅ Correct: {prof['correct']}", parse_mode='Markdown')
+
+# --- OWNER COMMANDS ---
+async def ban_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await owner_check(update): return
+    target = get_target_user(update)
+    if target and not isinstance(target, str):
+        ban_user(target.id)
+        await update.message.reply_text(f"🚫 {target.first_name} banned.")
+
+async def unban_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await owner_check(update): return
+    target = get_target_user(update)
+    if target and not isinstance(target, str):
+        unban_user(target.id)
+        await update.message.reply_text(f"✅ {target.first_name} unbanned.")
+
+async def mute_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await owner_check(update): return
+    target = get_target_user(update)
+    if target and not isinstance(target, str):
+        mute_user(target.id, update.effective_chat.id)
+        await update.message.reply_text(f"🔇 {target.first_name} muted.")
+
+async def unmute_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await owner_check(update): return
+    target = get_target_user(update)
+    if target and not isinstance(target, str):
+        unmute_user(target.id, update.effective_chat.id)
+        await update.message.reply_text(f"🔊 {target.first_name} unmuted.")
+
+async def reset_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await owner_check(update): return
+    reset_group_scores(update.effective_chat.id)
+    await update.message.reply_text("🧹 Group leaderboard reset!")
+
+async def reset_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await owner_check(update): return
+    reset_all_scores()
+    await update.message.reply_text("🧹 Global leaderboard reset!")
+
+async def global_state_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await owner_check(update): return
+    cmd, arg = parse_command(update.message.text)
+    set_global_state(arg == "on")
+    await update.message.reply_text(f"🌍 Global Quiz mode: {'ON' if arg == 'on' else 'OFF'}")
+
+async def add_q(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await owner_check(update): return
+    text = update.message.text.replace("AddQ@", "", 1)
+    try:
+        cat, q, a = text.split("@")
+        add_custom_question(cat.lower(), q, a.lower())
+        await update.message.reply_text(f"✅ Added to {cat}!")
+    except: await update.message.reply_text("❌ Format: `AddQ@easy@Question@Answer`")
+
+async def del_q(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await owner_check(update): return
+    text = update.message.text.replace("DelQ@", "", 1)
+    try:
+        cat, q = text.split("@")
+        if del_custom_question(cat.lower(), q): await update.message.reply_text(f"✅ Deleted.")
+        else: await update.message.reply_text("❌ Not found.")
+    except: await update.message.reply_text("❌ Format: `DelQ@easy@Question`")
+
+async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await owner_check(update): return
+    cmd, arg = parse_command(update.message.text)
+    if arg == "users": await update.message.reply_text(f"👥 Users: {get_total_users()}")
+    if arg == "groups": await update.message.reply_text(f"👥 Groups: {get_total_groups()}")
+
+async def broadcast_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await owner_check(update): return
+    text = update.message.text.replace("BroadcastAll@", "", 1)
+    if not text: return await update.message.reply_text("⚠️ Usage: `BroadcastAll@msg`")
+    groups = get_all_groups()
+    users = get_all_users()
+    await update.message.reply_text(f"📢 Broadcasting to {len(groups)} groups and {len(users)} users...")
+    for g in groups:
+        try: await context.bot.send_message(g['chat_id'], f"📢 {text}"); await asyncio.sleep(1)
+        except: pass
+    for u in users:
+        try: await context.bot.send_message(u['user_id'], f"📢 {text}"); await asyncio.sleep(1)
+        except: pass
+    await update.message.reply_text("✅ Broadcast All Sent!")
+
+async def broadcast_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await owner_check(update): return
+    text = update.message.text.replace("BroadcastGroups@", "", 1)
+    if not text: return await update.message.reply_text("⚠️ Usage: `BroadcastGroups@msg`")
+    groups = get_all_groups()
+    for g in groups:
+        try: await context.bot.send_message(g['chat_id'], f"📢 {text}"); await asyncio.sleep(1)
+        except: pass
+    await update.message.reply_text("✅ Sent to groups!")
+
+async def broadcast_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await owner_check(update): return
+    text = update.message.text.replace("BroadcastUsers@", "", 1)
+    if not text: return await update.message.reply_text("⚠️ Usage: `BroadcastUsers@msg`")
+    users = get_all_users()
+    for u in users:
+        try: await context.bot.send_message(u['user_id'], f"📢 {text}"); await asyncio.sleep(1)
+        except: pass
+    await update.message.reply_text("✅ Sent to users!")
+
+async def owner_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await owner_check(update): return
+    set_global_state(True)
+    await update.message.reply_text("🌍 Global ON. Bot is operational.")
+
+async def owner_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await owner_check(update): return
+    set_global_state(False)
+    await update.message.reply_text("🌍 Global OFF. Bot paused for users.")
+
+async def list_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await owner_check(update): return
+      groups = get_all_groups()
+    if not groups: return await update.message.reply_text("No groups found.")
+    text = "📋 *GROUPS LIST*\n\n"
+    for g in groups: text += f"• {g.get('title', 'Unknown')} : `{g['chat_id']}`\n"
+    await update.message.reply_text(text, parse_mode='Markdown')
+
+# --- MAIN ---
+def main():
+    threading.Thread(target=run_dummy_server, daemon=True).start()
+    application = Application.builder().token(BOT_TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start_cmd, filters=filters.ChatType.PRIVATE))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^help@$'), help_cmd))
+    application.add_handler(CallbackQueryHandler(help_cmd, pattern=r'^show_help$'))
+    application.add_handler(CallbackQueryHandler(back_to_start, pattern=r'^back_start$'))
+
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Quiz@(on|off)$'), quiz_cmd))
+    application.add_handler(CallbackQueryHandler(category_callback, pattern=r'^cat_'))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Speed@'), speed_cmd))
+    
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Score@me$'), score_me))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Score@all$'), score_all))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Score@group$'), score_group))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Profile@'), profile_cmd))
+    
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Skip@$'), skip_cmd))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Hint@$'), hint_cmd))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Yes@on$'), yes_perm))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^No@off$'), no_perm))
+    
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Ban@'), ban_cmd))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Unban@'), unban_cmd))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Mute@'), mute_cmd))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Unmute@'), unmute_cmd))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Reset@group$'), reset_group))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Reset@all$'), reset_all))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^AddQ@'), add_q))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^DelQ@'), del_q))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Stats@'), stats_cmd))
+    
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^BroadcastAll@'), broadcast_all))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^BroadcastGroups@'), broadcast_groups))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^BroadcastUsers@'), broadcast_users))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^ListGroups@$'), list_groups))
+    
+    application.add_handler(MessageHandler(filters.Regex(r'^\.on$'), owner_on))
+    application.add_handler(MessageHandler(filters.Regex(r'^\.off$'), owner_off))
+
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, answer_handler))
+    application.add_handler(MessageHandler(filters.ALL, lambda u, c: save_group(u.effective_chat.id, u.effective_chat.title) if u.effective_chat.type in ['group', 'supergroup'] else None))
+
+    print("🤖 Bot is running...")
+    application.run_polling()
+
+if __name__ == '__main__':
+    main()

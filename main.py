@@ -425,4 +425,59 @@ async def owner_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def list_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await owner_check(update): return
-    groups = get_all_gr
+        groups = get_all_groups()
+    if not groups: return await update.message.reply_text("No groups found.")
+    text = "📋 *GROUPS LIST*\n\n"
+    for g in groups: text += f"• {g.get('title', 'Unknown')} : `{g['chat_id']}`\n"
+    await update.message.reply_text(text, parse_mode='Markdown')
+
+# --- MAIN ---
+def main():
+    threading.Thread(target=run_dummy_server, daemon=True).start()
+    application = Application.builder().token(BOT_TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start_cmd, filters=filters.ChatType.PRIVATE))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^help@$'), help_cmd))
+    application.add_handler(CallbackQueryHandler(help_cmd, pattern=r'^show_help$'))
+    application.add_handler(CallbackQueryHandler(back_to_start, pattern=r'^back_start$'))
+
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Quiz@(on|off)$'), quiz_cmd))
+    application.add_handler(CallbackQueryHandler(category_callback, pattern=r'^cat_'))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Speed@'), speed_cmd))
+    
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Score@me$'), score_me))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Score@all$'), score_all))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Score@group$'), score_group))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Profile@'), profile_cmd))
+    
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Skip@$'), skip_cmd))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Hint@$'), hint_cmd))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Yes@on$'), yes_perm))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^No@off$'), no_perm))
+    
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Ban@'), ban_cmd))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Unban@'), unban_cmd))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Mute@'), mute_cmd))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Unmute@'), unmute_cmd))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Reset@group$'), reset_group))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Reset@all$'), reset_all))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^AddQ@'), add_q))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^DelQ@'), del_q))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^Stats@'), stats_cmd))
+    
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^BroadcastAll@'), broadcast_all))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^BroadcastGroups@'), broadcast_groups))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^BroadcastUsers@'), broadcast_users))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^ListGroups@$'), list_groups))
+    
+    application.add_handler(MessageHandler(filters.Regex(r'^\.on$'), owner_on))
+    application.add_handler(MessageHandler(filters.Regex(r'^\.off$'), owner_off))
+
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, answer_handler))
+    application.add_handler(MessageHandler(filters.ALL, lambda u, c: save_group(u.effective_chat.id, u.effective_chat.title) if u.effective_chat.type in ['group', 'supergroup'] else None))
+
+    print("🤖 Bot is running...")
+    application.run_polling()
+
+if __name__ == '__main__':
+    main()

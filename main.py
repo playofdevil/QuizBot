@@ -432,7 +432,7 @@ async def user_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target = get_target_user(update)
     if not target or isinstance(target, str): return await update.message.reply_text("⚠️ Reply to a user's message.")
     prof = get_user_profile(target.id, "global")
-        await update.message.reply_text(f"👤 *User Info*\nName: {target.first_name}\nID: `{target.id}`\nScore: {prof['score']}", parse_mode='Markdown')
+    await update.message.reply_text(f"👤 *User Info*\nName: {target.first_name}\nID: `{target.id}`\nScore: {prof['score']}", parse_mode='Markdown')
 
 async def force_join_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await owner_check(update): return

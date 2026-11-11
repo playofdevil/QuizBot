@@ -1,44 +1,44 @@
 # 🎯 English Quiz Bot Guide
 
-![English Quiz Bot](welcome.png)
+![English Quiz Bot](welcome.gif)
 
-Yeh bot Telegram groups ke liye ekdum perfect hai. Isme aapko saare commands ki list mil jayegi.
+Yeh bot Telegram groups ke liye ekdum perfect hai. Isme aapko saare commands ki list mil jayegi (Pure English).
 
-## 👑 BOT OWNER COMMANDS (Sirf Aapke Liye)
-- `.on` / `.off` : Bot ko kisi bhi group mein globally on/off karna.
-- `Top10Details@` : Duniya ke Top 10 users ki details (ID, Name, Group) dekhna.
-- `UserInfo@` : (Reply karke) Kisi bhi user ki details dekhna.
-- `ForceJoin@channel_link` : Channel join karne ka compulsion lagana.
-- `RemoveForceJoin@` : Force join hatana.
-- `BroadcastAll@msg` : Sabhi users aur groups ko message bhejna.
-- `BroadcastGroups@msg` : Sirf groups ko message bhejna.
-- `BroadcastUsers@msg` : Sirf private users ko message bhejna.
-- `ListGroups@` : Saare groups ki ID aur naam dekhna.
-- `Stats@users` / `Stats@groups` : Total users aur groups dekhna.
-- `Reset@all` / `Reset@group` : Leaderboard 0 karna (Points delete).
-- `AddQ@category@Question@Answer` : Naya sawal add karna.
-- `DelQ@category@Question` : Sawal delete karna.
-- `Ban@` / `Unban@` / `Mute@` / `Unmute@` : (Reply/Tag se) User ko control karna.
-
-## 🛡️ GROUP ADMIN / PERMITTED COMMANDS
-- `Quiz@on` / `Quiz@off` : Quiz start/stop.
-- `Speed@5s` (ya 10s, 1m) : Speed set karna.
-- `Skip@` : Current question skip (Sahi jawab batayega).
-- `Hint@` : Question ka hint.
-- `Pause@q` / `Resume@q` : Quiz ko beech mein pause aur resume karna.
-- `GroupStats@` : Group ki total players aur points ki stats dekhna.
-- `Yes@on` (Reply/Tag) : Kisi user ko quiz chalane ki permission dena.
-- `No@off` (Reply/Tag) : Permission hatana.
+## 🛡️ GROUP ADMIN COMMANDS (Admin & Permitted Users)
+- `Quiz@on` / `Quiz@off` : Start or stop the live quiz.
+- `Speed@5s` (or 10s, 1m) : Set the timer speed for the group.
+- `Skip@` : Skip the current question (Bot will reveal the answer).
+- `Hint@` : Get a hint for the current question.
+- `Pause@q` / `Resume@q` : Pause or resume the ongoing quiz.
+- `GroupStats@` : View total players and points in the group.
+- `Yes@on` (Reply/Tag) : Grant quiz control permissions to a user.
+- `No@off` (Reply/Tag) : Remove quiz control permissions.
 
 ## 👤 ALL USERS COMMANDS
-- `Score@me` : Apna score.
-- `Score@group` : Group ka Top 10.
-- `Score@all` : Global Top 10.
-- `Profile@username` (ya reply) : Kisi ka profile dekhna.
-- `help@` : Commands ka guide dekhna.
-- `Report@` : Kisi galat question ko report karna.
+- `Score@me` : View your personal score.
+- `Score@group` : View the group's top 10 leaderboard.
+- `Score@all` : View the global top 10 leaderboard.
+- `Profile@username` (or reply) : View any user's profile.
+- `help@` : View this commands guide.
+- `Report@` : Report a wrong question to the owner.
+
+## 👑 BOT OWNER COMMANDS (Only for the Owner)
+- `.on` / `.off` : Globally turn the bot on/off.
+- `Top10Details@` : View top 10 users with their ID, Name, and Group.
+- `UserInfo@` : (Reply) View detailed info of any user.
+- `ForceJoin@channel_link` : Set a compulsory channel to join before playing.
+- `RemoveForceJoin@` : Remove the force join channel.
+- `BroadcastAll@msg` : Send a message to all users and groups.
+- `BroadcastGroups@msg` : Send a message only to groups.
+- `BroadcastUsers@msg` : Send a message only to private users.
+- `ListGroups@` : View all groups where the bot is added.
+- `Stats@users` / `Stats@groups` : View total users and groups.
+- `Reset@all` / `Reset@group` : Reset the leaderboard (Deletes points).
+- `AddQ@category@Question@Answer` : Add a custom question.
+- `DelQ@category@Question` : Delete a custom question.
+- `Ban@` / `Unban@` / `Mute@` / `Unmute@` : (Reply/Tag) Control users.
 
 ## 🏆 POINT SYSTEM
-- 10 second ke andar = 100 Points
-- 20 second ke andar = 50 Points
-- 20 second ke baad = 20 Points
+- Answer within 10 seconds = 100 Points
+- Answer within 20 seconds = 50 Points
+- Answer after 20 seconds = 20 Points

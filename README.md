@@ -1,15 +1,21 @@
 # 🎯 English Quiz Bot Guide
 
+![English Quiz Bot](welcome.png)
+
 Yeh bot Telegram groups ke liye ekdum perfect hai. Isme aapko saare commands ki list mil jayegi.
 
 ## 👑 BOT OWNER COMMANDS (Sirf Aapke Liye)
-- `.on` / `.off` : Bot ko kisi bhi group mein on/off karna.
+- `.on` / `.off` : Bot ko kisi bhi group mein globally on/off karna.
+- `Top10Details@` : Duniya ke Top 10 users ki details (ID, Name, Group) dekhna.
+- `UserInfo@` : (Reply karke) Kisi bhi user ki details dekhna.
+- `ForceJoin@channel_link` : Channel join karne ka compulsion lagana.
+- `RemoveForceJoin@` : Force join hatana.
 - `BroadcastAll@msg` : Sabhi users aur groups ko message bhejna.
 - `BroadcastGroups@msg` : Sirf groups ko message bhejna.
 - `BroadcastUsers@msg` : Sirf private users ko message bhejna.
 - `ListGroups@` : Saare groups ki ID aur naam dekhna.
-- `Stats@users` / `Stats@groups` : Total users aur groups.
-- `Reset@all` / `Reset@group` : Leaderboard 0 karna.
+- `Stats@users` / `Stats@groups` : Total users aur groups dekhna.
+- `Reset@all` / `Reset@group` : Leaderboard 0 karna (Points delete).
 - `AddQ@category@Question@Answer` : Naya sawal add karna.
 - `DelQ@category@Question` : Sawal delete karna.
 - `Ban@` / `Unban@` / `Mute@` / `Unmute@` : (Reply/Tag se) User ko control karna.
@@ -19,7 +25,9 @@ Yeh bot Telegram groups ke liye ekdum perfect hai. Isme aapko saare commands ki 
 - `Speed@5s` (ya 10s, 1m) : Speed set karna.
 - `Skip@` : Current question skip (Sahi jawab batayega).
 - `Hint@` : Question ka hint.
-- `Yes@on` (Reply/Tag) : Kisi user ko permission dena.
+- `Pause@q` / `Resume@q` : Quiz ko beech mein pause aur resume karna.
+- `GroupStats@` : Group ki total players aur points ki stats dekhna.
+- `Yes@on` (Reply/Tag) : Kisi user ko quiz chalane ki permission dena.
 - `No@off` (Reply/Tag) : Permission hatana.
 
 ## 👤 ALL USERS COMMANDS
@@ -28,6 +36,7 @@ Yeh bot Telegram groups ke liye ekdum perfect hai. Isme aapko saare commands ki 
 - `Score@all` : Global Top 10.
 - `Profile@username` (ya reply) : Kisi ka profile dekhna.
 - `help@` : Commands ka guide dekhna.
+- `Report@` : Kisi galat question ko report karna.
 
 ## 🏆 POINT SYSTEM
 - 10 second ke andar = 100 Points

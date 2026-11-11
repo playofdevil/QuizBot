@@ -534,10 +534,8 @@ def main():
     threading.Thread(target=run_dummy_server, daemon=True).start()
     application = Application.builder().token(BOT_TOKEN).build()
 
-    application.add_handler(CommandHandler("start", start_cmd, filters=filters.ChatType.PRIVATE))
+        application.add_handler(CommandHandler("start", start_cmd, filters=filters.ChatType.PRIVATE))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^help@'), help_cmd))
-    application.add_handler(CallbackQueryHandler(help_cmd, pattern=r'^show_help$'))
-    application.add_handler(CallbackQueryHandler(back_to_start, pattern=r'^back_start$'))
 
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^Quiz@'), quiz_cmd))
     application.add_handler(CallbackQueryHandler(category_callback, pattern=r'^cat_'))

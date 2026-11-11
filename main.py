@@ -534,7 +534,7 @@ def main():
     threading.Thread(target=run_dummy_server, daemon=True).start()
     application = Application.builder().token(BOT_TOKEN).build()
 
-        application.add_handler(CommandHandler("start", start_cmd, filters=filters.ChatType.PRIVATE))
+    application.add_handler(CommandHandler("start", start_cmd, filters=filters.ChatType.PRIVATE))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^help@'), help_cmd))
 
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^Quiz@'), quiz_cmd))

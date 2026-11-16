@@ -986,7 +986,7 @@ def main():
     logger.info(f"👑 Owners loaded: {OWNER_IDS}")
     threading.Thread(target=run_dummy_server, daemon=True).start()
 
-    application = (Application.builder().token(BOT_TOKEN).get_updates_read_timeout(60).get_updates_connect_timeout(15).read_timeout(30).connect_timeout(10).bootstrap_retries(5).build())
+    application = (Application.builder().token(BOT_TOKEN).get_updates_read_timeout(60).get_updates_connect_timeout(15).read_timeout(30).connect_timeout(10).build())
 
     # Start / Help / Welcome Callbacks
     application.add_handler(CommandHandler("start", start_cmd, filters=filters.ChatType.PRIVATE))

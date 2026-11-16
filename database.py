@@ -2,6 +2,9 @@ import os
 from pymongo import MongoClient
 
 MONGO_URI = os.environ.get("MONGO_URI")
+if not MONGO_URI:
+    raise ValueError("❌ MONGO_URI environment variable is not set!")
+
 client = MongoClient(MONGO_URI)
 db = client['QuizBotDB']
 
@@ -23,6 +26,11 @@ def save_user(user_id, username, first_name):
 def save_group(chat_id, title):
     groups_col.update_one({"chat_id": chat_id}, {"$set": {"title": title}}, upsert=True)
     settings_col.update_one({"chat_id": chat_id}, {"$setOnInsert": {"speed": 15, "limit": 0, "auto_delete": False, "schedule": None}}, upsert=True)
+
+def get_user_by_username(username):
+    if not username:
+        return None
+    return users_col.find_one({"username": {"$regex": f"^{username}$", "$options": "i"}})
 
 def add_score(user_id, chat_id, username, points, time_taken):
     scores_col.update_one(
@@ -47,16 +55,22 @@ def get_top_100(chat_id="global"):
     return list(scores_col.find({"chat_id": chat_id}).sort("score", -1).limit(100))
 
 def get_top_10_fastest():
-    return list(scores_col.find({"chat_id": "global", "fastest_time": {"$exists": True}}).sort("fastest_time", 1).limit(10))
+    return list(scores_col.find({"chat_id": "global", "fastest_time": {"$exists": True, "$ne": None, "$gt": 0}}).sort("fastest_time", 1).limit(10))
 
 def get_top_20_fastest():
-    return list(scores_col.find({"chat_id": "global", "fastest_time": {"$exists": True}}).sort("fastest_time", 1).limit(20))
+    return list(scores_col.find({"chat_id": "global", "fastest_time": {"$exists": True, "$ne": None, "$gt": 0}}).sort("fastest_time", 1).limit(20))
 
 def get_user_rank(user_id):
     global_profile = scores_col.find_one({"user_id": user_id, "chat_id": "global"})
     if not global_profile: return 0
     user_score = global_profile.get('score', 0)
     return scores_col.count_documents({"chat_id": "global", "score": {"$gt": user_score}}) + 1
+
+def get_group_stats(chat_id):
+    users = scores_col.count_documents({"chat_id": chat_id})
+    scores = list(scores_col.find({"chat_id": chat_id}))
+    total_points = sum(s.get('score', 0) for s in scores)
+    return {"players": users, "points": total_points}
 
 def get_total_users(): return users_col.count_documents({})
 def get_total_groups(): return groups_col.count_documents({})
@@ -90,11 +104,25 @@ def get_global_state():
     state = global_settings_col.find_one({"_id": "global_quiz"})
     return state['state'] if state else True
 
+def set_welcome_gif(url):
+    if url:
+        global_settings_col.update_one({"_id": "welcome_gif"}, {"$set": {"url": url}}, upsert=True)
+    else:
+        global_settings_col.delete_one({"_id": "welcome_gif"})
+
+def get_welcome_gif():
+    doc = global_settings_col.find_one({"_id": "welcome_gif"})
+    if doc and doc.get('url'):
+        return doc['url']
+    return None
+
 def add_custom_question(category, question, answer):
     custom_questions_col.update_one({"category": category, "question": question}, {"$set": {"answer": answer}}, upsert=True)
+
 def del_custom_question(category, question):
     result = custom_questions_col.delete_one({"category": category, "question": question})
     return result.deleted_count > 0
+
 def get_custom_questions(category): return list(custom_questions_col.find({"category": category}))
 
 def set_force_join(channel_id): force_join_col.update_one({"_id": "channel"}, {"$set": {"channel_id": channel_id}}, upsert=True)
@@ -110,19 +138,22 @@ def remove_custom_welcome(chat_id): welcome_col.delete_one({"chat_id": chat_id})
 
 # Delete Commands (Owner)
 def delete_group_score_by_id(group_id):
-    res = scores_col.delete_many({"chat_id": int(group_id)})
-    return res.deleted_count > 0
+    try:
+        res = scores_col.delete_many({"chat_id": int(group_id)})
+        return res.deleted_count > 0
+    except (ValueError, TypeError):
+        return False
 
 def delete_user_score_by_rank(rank):
     top_users = get_top_100()
-    if rank <= 0 or rank > len(top_users): return False
+    if rank <= 0 or rank > len(top_users): return None
     target = top_users[rank - 1]
     scores_col.delete_many({"user_id": target['user_id']})
-    return target['username']
+    return target.get('username') or f"User_{target['user_id']}"
 
 def delete_fast_by_rank(rank):
     top_fast = get_top_20_fastest()
-    if rank <= 0 or rank > len(top_fast): return False
+    if rank <= 0 or rank > len(top_fast): return None
     target = top_fast[rank - 1]
     scores_col.update_one({"user_id": target['user_id'], "chat_id": "global"}, {"$unset": {"fastest_time": ""}})
-    return target['username']
+    return target.get('username') or f"User_{target['user_id']}"
